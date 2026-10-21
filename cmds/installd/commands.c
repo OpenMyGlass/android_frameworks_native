@@ -757,7 +757,7 @@ int dexopt(const char *apk_path, uid_t uid, int is_public)
             exit(67);
         }
 
-        /* OpenMyGlass: ART only; /system/bin/dexopt is not built. */
+        /* OpenMyGlass: ART only; Dalvik's dexopt is not built. */
         run_dex2oat(zip_fd, out_fd, apk_path, out_path, compiler_filter);
         exit(68);   /* only get here on exec failure */
     } else {
