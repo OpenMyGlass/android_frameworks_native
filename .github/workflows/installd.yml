@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+# OpenMyGlass: checks for our installd changes (ART only, dex2oat filters). The full AOSP build
+# runs from OpenMyGlass/manifest; this job only needs a host compiler and pinned AOSP headers.
+name: installd
+on:
+  push:
+    branches: [glass-4.4]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  installd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # android-security/android_system_core aosp-4.4, as pinned in OpenMyGlass/manifest.
+      SYSTEM_CORE_REPO: https://github.com/android-security/android_system_core
+      SYSTEM_CORE_COMMIT: f8b2fe863354f13d12077a29390a8ba991954feb
+      # platform/external/libselinux at android-4.4.4_r2.0.1.
+      LIBSELINUX_REPO: https://android.googlesource.com/platform/external/libselinux
+      LIBSELINUX_COMMIT: 8b4760949bbafdee6f7825f39423f3db745f4115
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Filter selection, host test
+        run: |
+          gcc -std=gnu99 -Wall -Wextra -Werror -fsanitize=address,undefined -I cmds/installd \
+            -o "$RUNNER_TEMP/glass_dex2oat_test" \
+            cmds/installd/glass_dex2oat.c cmds/installd/tests/glass_dex2oat_test.c
+          "$RUNNER_TEMP/glass_dex2oat_test"
+      - name: Fetch pinned AOSP headers
+        run: |
+          fetch() {
+            git init -q "$2"
+            git -C "$2" fetch -q --depth=1 "$1" "$3"
+            git -C "$2" checkout -q FETCH_HEAD
+            test "$(git -C "$2" rev-parse HEAD)" = "$3"
+          }
+          fetch "$SYSTEM_CORE_REPO" "$RUNNER_TEMP/system_core" "$SYSTEM_CORE_COMMIT"
+          fetch "$LIBSELINUX_REPO" "$RUNNER_TEMP/libselinux" "$LIBSELINUX_COMMIT"
+          sudo apt-get install -y -q libcap-dev >/dev/null
+      - name: Compile commands.c and installd.c (syntax and warnings)
+        run: |
+          for f in cmds/installd/commands.c cmds/installd/installd.c; do
+            gcc -std=gnu99 -fsyntax-only -Wall -Werror=implicit-function-declaration \
+              -Werror=incompatible-pointer-types -Werror=int-conversion \
+              -Werror=unused-function -Werror=unused-variable \
+              -I cmds/installd -I "$RUNNER_TEMP/system_core/include" \
+              -I "$RUNNER_TEMP/libselinux/include" "$f"
+          done
+      - name: No dexopt path left in installd
+        run: |
+          ! grep -n 'run_dexopt\|/system/bin/dexopt\|"libdvm' cmds/installd/commands.c

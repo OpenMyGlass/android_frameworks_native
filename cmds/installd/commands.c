@@ -18,6 +18,7 @@
 #include "installd.h"
 #include <diskusage/dirsize.h>
 #include <selinux/android.h>
+#include "glass_dex2oat.h"
 
 /* Directory records that are used in execution of commands. */
 dir_rec_t android_data_dir;
@@ -578,25 +579,8 @@ int create_cache_path(char path[PKG_PATH_MAX], const char *src)
     return 0;
 }
 
-static void run_dexopt(int zip_fd, int odex_fd, const char* input_file_name,
-    const char* output_file_name, const char* dexopt_flags)
-{
-    static const char* DEX_OPT_BIN = "/system/bin/dexopt";
-    static const int MAX_INT_LEN = 12;      // '-'+10dig+'\0' -OR- 0x+8dig
-    char zip_num[MAX_INT_LEN];
-    char odex_num[MAX_INT_LEN];
-
-    sprintf(zip_num, "%d", zip_fd);
-    sprintf(odex_num, "%d", odex_fd);
-
-    ALOGV("Running %s in=%s out=%s\n", DEX_OPT_BIN, input_file_name, output_file_name);
-    execl(DEX_OPT_BIN, DEX_OPT_BIN, "--zip", zip_num, odex_num, input_file_name,
-        dexopt_flags, (char*) NULL);
-    ALOGE("execl(%s) failed: %s\n", DEX_OPT_BIN, strerror(errno));
-}
-
 static void run_dex2oat(int zip_fd, int oat_fd, const char* input_file_name,
-    const char* output_file_name, const char* dexopt_flags)
+    const char* output_file_name, const char* compiler_filter)
 {
     static const char* DEX2OAT_BIN = "/system/bin/dex2oat";
     static const int MAX_INT_LEN = 12;      // '-'+10dig+'\0' -OR- 0x+8dig
@@ -604,17 +588,31 @@ static void run_dex2oat(int zip_fd, int oat_fd, const char* input_file_name,
     char zip_location_arg[strlen("--zip-location=") + PKG_PATH_MAX];
     char oat_fd_arg[strlen("--oat-fd=") + MAX_INT_LEN];
     char oat_location_arg[strlen("--oat-name=") + PKG_PATH_MAX];
+    char filter_arg[strlen("-compiler-filter:") + GLASS_D2O_FILTER_MAX];
 
     sprintf(zip_fd_arg, "--zip-fd=%d", zip_fd);
     sprintf(zip_location_arg, "--zip-location=%s", input_file_name);
     sprintf(oat_fd_arg, "--oat-fd=%d", oat_fd);
     sprintf(oat_location_arg, "--oat-location=%s", output_file_name);
 
-    ALOGV("Running %s in=%s out=%s\n", DEX2OAT_BIN, input_file_name, output_file_name);
-    execl(DEX2OAT_BIN, DEX2OAT_BIN,
-          zip_fd_arg, zip_location_arg,
-          oat_fd_arg, oat_location_arg,
-          (char*) NULL);
+    if (compiler_filter != NULL && compiler_filter[0] != '\0') {
+        /* OpenMyGlass: 4.4's dex2oat passes --runtime-arg values to the runtime, which parses
+         * -compiler-filter:<name> (art/runtime/runtime.cc). */
+        snprintf(filter_arg, sizeof(filter_arg), "-compiler-filter:%s", compiler_filter);
+        ALOGV("Running %s in=%s out=%s filter=%s\n", DEX2OAT_BIN, input_file_name,
+              output_file_name, compiler_filter);
+        execl(DEX2OAT_BIN, DEX2OAT_BIN,
+              zip_fd_arg, zip_location_arg,
+              oat_fd_arg, oat_location_arg,
+              "--runtime-arg", filter_arg,
+              (char*) NULL);
+    } else {
+        ALOGV("Running %s in=%s out=%s\n", DEX2OAT_BIN, input_file_name, output_file_name);
+        execl(DEX2OAT_BIN, DEX2OAT_BIN,
+              zip_fd_arg, zip_location_arg,
+              oat_fd_arg, oat_location_arg,
+              (char*) NULL);
+    }
     ALOGE("execl(%s) failed: %s\n", DEX2OAT_BIN, strerror(errno));
 }
 
@@ -657,6 +655,10 @@ int dexopt(const char *apk_path, uid_t uid, int is_public)
     char out_path[PKG_PATH_MAX];
     char dexopt_flags[PROPERTY_VALUE_MAX];
     char persist_sys_dalvik_vm_lib[PROPERTY_VALUE_MAX];
+    char d2o_sys[PROPERTY_VALUE_MAX];
+    char d2o_usr[PROPERTY_VALUE_MAX];
+    char compiler_filter[GLASS_D2O_FILTER_MAX];
+    FILE *d2o_overrides;
     char *end;
     int res, zip_fd=-1, out_fd=-1;
 
@@ -668,8 +670,25 @@ int dexopt(const char *apk_path, uid_t uid, int is_public)
     property_get("dalvik.vm.dexopt-flags", dexopt_flags, "");
     ALOGV("dalvik.vm.dexopt_flags=%s\n", dexopt_flags);
 
-    /* The command to run depend ones the value of persist.sys.dalvik.vm.lib */
-    property_get("persist.sys.dalvik.vm.lib", persist_sys_dalvik_vm_lib, "libdvm.so");
+    /* OpenMyGlass: this system is ART only (no libdvm, no dexopt), so the default is libart
+     * and dex2oat runs whatever the property says; the value is only logged. */
+    property_get("persist.sys.dalvik.vm.lib", persist_sys_dalvik_vm_lib, "libart.so");
+    if (strncmp(persist_sys_dalvik_vm_lib, "libart", 6) != 0) {
+        ALOGW("persist.sys.dalvik.vm.lib=%s, but this system is ART only: running dex2oat\n",
+              persist_sys_dalvik_vm_lib);
+    }
+
+    /* OpenMyGlass: pick the dex2oat compiler filter (glass_dex2oat.h). */
+    compiler_filter[0] = '\0';
+    property_get(GLASS_D2O_SYS_PROPERTY, d2o_sys, "");
+    property_get(GLASS_D2O_USR_PROPERTY, d2o_usr, "");
+    d2o_overrides = fopen(GLASS_D2O_OVERRIDES, "r");
+    if (!glass_d2o_pick_filter(apk_path, d2o_sys, d2o_usr, d2o_overrides, compiler_filter)) {
+        compiler_filter[0] = '\0';
+    }
+    if (d2o_overrides != NULL) {
+        fclose(d2o_overrides);
+    }
 
     /* Before anything else: is there a .odex file?  If so, we have
      * precompiled the apk and there is nothing to do here.
@@ -738,13 +757,8 @@ int dexopt(const char *apk_path, uid_t uid, int is_public)
             exit(67);
         }
 
-        if (strncmp(persist_sys_dalvik_vm_lib, "libdvm", 6) == 0) {
-            run_dexopt(zip_fd, out_fd, apk_path, out_path, dexopt_flags);
-        } else if (strncmp(persist_sys_dalvik_vm_lib, "libart", 6) == 0) {
-            run_dex2oat(zip_fd, out_fd, apk_path, out_path, dexopt_flags);
-        } else {
-            exit(69);   /* Unexpected persist.sys.dalvik.vm.lib value */
-        }
+        /* OpenMyGlass: ART only; /system/bin/dexopt is not built. */
+        run_dex2oat(zip_fd, out_fd, apk_path, out_path, compiler_filter);
         exit(68);   /* only get here on exec failure */
     } else {
         res = wait_dexopt(pid, apk_path);

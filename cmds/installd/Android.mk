@@ -1,7 +1,7 @@
 LOCAL_PATH := $(call my-dir)
 
 common_src_files := \
-    commands.c utils.c
+    commands.c utils.c glass_dex2oat.c
 
 #
 # Static library used in testing and executable
