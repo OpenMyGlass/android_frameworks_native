@@ -63,7 +63,7 @@ jobs:
               -Werror=incompatible-pointer-types -Werror=int-conversion \
               -Werror=unused-function -Werror=unused-variable \
               -DHAVE_SYS_UIO_H -DHAVE_ANDROID_OS=1 \
-              -I cmds/installd -I "$RUNNER_TEMP/system_core/include" \
+              -I cmds/installd -I include -I "$RUNNER_TEMP/system_core/include" \
               -I "$RUNNER_TEMP/libselinux/include" "$f"
           done
       - name: No dexopt path left in installd
