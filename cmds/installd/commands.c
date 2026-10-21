@@ -599,7 +599,7 @@ static void run_dex2oat(int zip_fd, int oat_fd, const char* input_file_name,
         /* OpenMyGlass: 4.4's dex2oat passes --runtime-arg values to the runtime, which parses
          * -compiler-filter:<name> (art/runtime/runtime.cc). */
         snprintf(filter_arg, sizeof(filter_arg), "-compiler-filter:%s", compiler_filter);
-        ALOGV("Running %s in=%s out=%s filter=%s\n", DEX2OAT_BIN, input_file_name,
+        ALOGI("Running %s in=%s out=%s filter=%s\n", DEX2OAT_BIN, input_file_name,
               output_file_name, compiler_filter);
         execl(DEX2OAT_BIN, DEX2OAT_BIN,
               zip_fd_arg, zip_location_arg,
@@ -653,7 +653,6 @@ int dexopt(const char *apk_path, uid_t uid, int is_public)
     struct utimbuf ut;
     struct stat apk_stat, dex_stat;
     char out_path[PKG_PATH_MAX];
-    char dexopt_flags[PROPERTY_VALUE_MAX];
     char persist_sys_dalvik_vm_lib[PROPERTY_VALUE_MAX];
     char d2o_sys[PROPERTY_VALUE_MAX];
     char d2o_usr[PROPERTY_VALUE_MAX];
@@ -666,9 +665,6 @@ int dexopt(const char *apk_path, uid_t uid, int is_public)
         return -1;
     }
 
-    /* platform-specific flags affecting optimization and verification */
-    property_get("dalvik.vm.dexopt-flags", dexopt_flags, "");
-    ALOGV("dalvik.vm.dexopt_flags=%s\n", dexopt_flags);
 
     /* OpenMyGlass: this system is ART only (no libdvm, no dexopt), so the default is libart
      * and dex2oat runs whatever the property says; the value is only logged. */

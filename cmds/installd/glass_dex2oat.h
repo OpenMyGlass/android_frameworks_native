@@ -9,6 +9,16 @@
  *   - a per-package line in /data/system/glass-dex2oat-filters overrides both.
  * The property names fit 4.4's 31-character limit (PROP_NAME_MAX 32).
  *
+ * Limits of 4.4's dex2oat and runtime:
+ *   - dex2oat compiles a dex file of 900 methods or fewer with "speed" whatever the filter,
+ *     unless the filter is "interpret-only" (dex2oat.cc, kDefaultNumDexMethodsThreshold), so
+ *     "space" and "balanced" only change larger apps.
+ *   - These settings apply to the compiles installd runs. The boot image, and compiles the
+ *     runtime starts itself (class_linker.cc, e.g. after /data/dalvik-cache is wiped or for a
+ *     DexClassLoader), use the runtime's own filter.
+ *   - Override keys are package names for /data/app and /mnt/asec APKs, but file names for
+ *     system APKs ("Settings" for /system/app/Settings.apk), since installd sees only the path.
+ *
  * This file has no Android dependency so that it builds and is tested on a host.
  */
 #ifndef GLASS_DEX2OAT_H

@@ -74,8 +74,11 @@ jobs:
           for f in cmds/installd/commands.c cmds/installd/installd.c; do
             diag "$RUNNER_TEMP/base" "$f" > "$RUNNER_TEMP/before.txt"
             diag "$PWD" "$f" > "$RUNNER_TEMP/after.txt"
-            if grep -q 'error:' "$RUNNER_TEMP/after.txt" && ! grep -q 'error:' "$RUNNER_TEMP/before.txt"; then
-              new=1
+            echo "== $f at BASE_COMMIT"; cat "$RUNNER_TEMP/before.txt"
+            echo "== $f here"; cat "$RUNNER_TEMP/after.txt"
+            # Any error (fatal or not) would hide diagnostics after it: fail on all of them.
+            if grep -q 'error:' "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt"; then
+              echo "::error file=$f::compile error, see above"; new=1
             fi
             if comm -13 "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" | grep .; then
               echo "::error file=$f::new diagnostics (above)"; new=1
