@@ -19,10 +19,13 @@ jobs:
       # platform/external/libselinux at android-4.4.4_r2.0.1.
       LIBSELINUX_REPO: https://android.googlesource.com/platform/external/libselinux
       LIBSELINUX_COMMIT: 8b4760949bbafdee6f7825f39423f3db745f4115
+      # android-security/android_frameworks_native aosp-4.4, the base of branch glass-4.4.
+      BASE_COMMIT: 77f69267bcbc7cc4ca90a0e6d55e58f19df735e1
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Filter selection, host test
         run: |
           gcc -std=gnu99 -Wall -Wextra -Werror -fsanitize=address,undefined -I cmds/installd \
@@ -54,18 +57,34 @@ jobs:
           fi
           unzip -q "$zip" 'android-ndk-r25c/toolchains/llvm/*' -d "$RUNNER_TEMP"
           echo "CC_ARM=$RUNNER_TEMP/android-ndk-r25c/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi19-clang" >> "$GITHUB_ENV"
-      - name: Compile commands.c and installd.c for the device (syntax and warnings)
+      - name: Compile installd for the device; no new diagnostics against the base
         run: |
           # HAVE_SYS_UIO_H and HAVE_ANDROID_OS come from 4.4's force-included AndroidConfig.h
-          # (build/core/combo/include/arch/linux-arm) in a real build.
-          for f in cmds/installd/commands.c cmds/installd/installd.c cmds/installd/glass_dex2oat.c; do
-            "$CC_ARM" -std=gnu99 -fsyntax-only -Wall -Werror=implicit-function-declaration \
-              -Werror=incompatible-pointer-types -Werror=int-conversion \
-              -Werror=unused-function -Werror=unused-variable \
-              -DHAVE_SYS_UIO_H -DHAVE_ANDROID_OS=1 \
-              -I cmds/installd -I include -I "$RUNNER_TEMP/system_core/include" \
-              -I "$RUNNER_TEMP/libselinux/include" "$f"
+          # (build/core/combo/include/arch/linux-arm) in a real build. The upstream files have
+          # warnings of their own under this newer clang, so the check is that our changes
+          # add none: diagnostics without line numbers, here versus at BASE_COMMIT.
+          diag() {
+            "$CC_ARM" -std=gnu99 -fsyntax-only -Wall -DHAVE_SYS_UIO_H -DHAVE_ANDROID_OS=1 \
+              -I "$1/cmds/installd" -I "$1/include" -I "$RUNNER_TEMP/system_core/include" \
+              -I "$RUNNER_TEMP/libselinux/include" "$1/$2" 2>&1 \
+              | grep -E '(warning|error):' | sed -E 's/^[^ ]*:[0-9]+:[0-9]+: //' | sort
+          }
+          git worktree add -q --detach "$RUNNER_TEMP/base" "$BASE_COMMIT"
+          new=0
+          for f in cmds/installd/commands.c cmds/installd/installd.c; do
+            diag "$RUNNER_TEMP/base" "$f" > "$RUNNER_TEMP/before.txt"
+            diag "$PWD" "$f" > "$RUNNER_TEMP/after.txt"
+            if grep -q 'error:' "$RUNNER_TEMP/after.txt" && ! grep -q 'error:' "$RUNNER_TEMP/before.txt"; then
+              new=1
+            fi
+            if comm -13 "$RUNNER_TEMP/before.txt" "$RUNNER_TEMP/after.txt" | grep .; then
+              echo "::error file=$f::new diagnostics (above)"; new=1
+            fi
           done
+          # Our own file: no warning at all.
+          "$CC_ARM" -std=gnu99 -fsyntax-only -Wall -Wextra -Werror -I cmds/installd \
+            cmds/installd/glass_dex2oat.c
+          exit $new
       - name: No dexopt path left in installd
         run: |
           ! grep -n 'run_dexopt\|/system/bin/dexopt\|"libdvm' cmds/installd/commands.c
