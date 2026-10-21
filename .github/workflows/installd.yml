@@ -39,13 +39,30 @@ jobs:
           }
           fetch "$SYSTEM_CORE_REPO" "$RUNNER_TEMP/system_core" "$SYSTEM_CORE_COMMIT"
           fetch "$LIBSELINUX_REPO" "$RUNNER_TEMP/libselinux" "$LIBSELINUX_COMMIT"
-          sudo apt-get install -y -q libcap-dev >/dev/null
-      - name: Compile commands.c and installd.c (syntax and warnings)
+      - name: Cache the NDK zip
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ndk.zip
+          key: ndk-r25c-769ee342ea75f80619d985c2da990c48b3d8eaf45f48783a2d48870d04b46108
+      - name: Fetch the pinned NDK (r25c, the newest with API 19)
         run: |
-          for f in cmds/installd/commands.c cmds/installd/installd.c; do
-            gcc -std=gnu99 -fsyntax-only -Wall -Werror=implicit-function-declaration \
+          zip=$RUNNER_TEMP/ndk.zip
+          sum=769ee342ea75f80619d985c2da990c48b3d8eaf45f48783a2d48870d04b46108
+          if ! echo "$sum  $zip" | sha256sum -c --status -; then
+            curl -fsSL --retry 3 -o "$zip" https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+            echo "$sum  $zip" | sha256sum -c -
+          fi
+          unzip -q "$zip" 'android-ndk-r25c/toolchains/llvm/*' -d "$RUNNER_TEMP"
+          echo "CC_ARM=$RUNNER_TEMP/android-ndk-r25c/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi19-clang" >> "$GITHUB_ENV"
+      - name: Compile commands.c and installd.c for the device (syntax and warnings)
+        run: |
+          # HAVE_SYS_UIO_H and HAVE_ANDROID_OS come from 4.4's force-included AndroidConfig.h
+          # (build/core/combo/include/arch/linux-arm) in a real build.
+          for f in cmds/installd/commands.c cmds/installd/installd.c cmds/installd/glass_dex2oat.c; do
+            "$CC_ARM" -std=gnu99 -fsyntax-only -Wall -Werror=implicit-function-declaration \
               -Werror=incompatible-pointer-types -Werror=int-conversion \
               -Werror=unused-function -Werror=unused-variable \
+              -DHAVE_SYS_UIO_H -DHAVE_ANDROID_OS=1 \
               -I cmds/installd -I "$RUNNER_TEMP/system_core/include" \
               -I "$RUNNER_TEMP/libselinux/include" "$f"
           done
