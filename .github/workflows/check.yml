@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # OpenMyGlass: checks for branch glass-6.0, AOSP android-6.0.1_r81 plus pinned cherry-picks. The
-# full AOSP build runs from OpenMyGlass/manifest, branch android-6.0.
+# full AOSP build runs from OpenMyGlass/manifest's android-6.0.xml, a file on main.
 name: check
 on:
   push:
@@ -20,9 +20,11 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Fetch the cherry-pick sources
-        run: git fetch -q origin aosp-6.0-omap
+      - name: Fetch the upstream branch the cherry-picks come from
+        run: git fetch -q --no-tags https://github.com/android-security/android_frameworks_native.git +refs/heads/aosp-6.0-omap:refs/upstream/aosp-6.0-omap
       - name: Shell scripts
         run: shellcheck -s sh tests/*.sh
       - name: Only unchanged cherry-picks on top of AOSP
-        run: sh tests/check_cherry_picks.sh "$BASE_COMMIT"
+        run: sh tests/check_cherry_picks.sh "$BASE_COMMIT" refs/upstream/aosp-6.0-omap
+      - name: Tests
+        run: for t in tests/test_*.sh; do sh "$t" || exit 1; done
