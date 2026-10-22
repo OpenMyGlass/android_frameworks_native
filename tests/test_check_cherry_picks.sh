@@ -9,7 +9,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cd "$tmp"
 git init -q -b main .
+# No global git identity on CI runners: set every identity here.
 export GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@example.org
+export GIT_AUTHOR_NAME=Us GIT_AUTHOR_EMAIL=us@example.org
 up() { GIT_AUTHOR_NAME=Up GIT_AUTHOR_EMAIL=up@example.org GIT_AUTHOR_DATE='1500000000 +0000' "$@"; }
 echo a > f && git add f && up git commit -q -m base
 base=$(git rev-parse HEAD)
